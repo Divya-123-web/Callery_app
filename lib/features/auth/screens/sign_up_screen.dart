@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/calley_logo.dart';
+import '../services/auth_service.dart';
 import 'otp_verification_screen.dart';
 import 'sign_in_screen.dart';
 
@@ -22,6 +24,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _obscurePassword = true;
   bool _agreed = false;
   bool _showTermsError = false;
+  bool _loading = false;
 
   @override
   void dispose() {
@@ -32,19 +35,48 @@ class _SignUpScreenState extends State<SignUpScreen> {
     super.dispose();
   }
 
-  void _submit() {
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _submit() async {
     final valid = _formKey.currentState!.validate();
     setState(() => _showTermsError = !_agreed);
-    if (!valid || !_agreed) return;
+    if (!valid || !_agreed || _loading) return;
 
-    // TODO: Call the Sign Up API here once the documentation is available.
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => OtpVerificationScreen(
-          phoneNumber: '+91 ${_mobileController.text.trim()}',
+    FocusScope.of(context).unfocus();
+    setState(() => _loading = true);
+
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim().toLowerCase();
+    final password = _passwordController.text;
+
+    try {
+      // 1) POST /auth/register  (mobile number is not part of this API)
+      await AuthService.register(
+        username: name,
+        email: email,
+        password: password,
+      );
+
+      // 2) POST /auth/send-otp  (OTP is sent to the email)
+      await AuthService.sendOtp(email: email);
+
+      if (!mounted) return;
+      _showMessage('Registered! OTP sent to your email.');
+
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => OtpVerificationScreen(email: email),
         ),
-      ),
-    );
+      );
+    } on ApiException catch (e) {
+      if (mounted) _showMessage(e.message);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   void _openSignIn() {
@@ -255,13 +287,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                 ),
                                 GestureDetector(
                                   onTap: () {
-                                    ScaffoldMessenger.of(context)
-                                        .showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                            'Terms and Conditions coming soon'),
-                                      ),
-                                    );
+                                    _showMessage(
+                                        'Terms and Conditions coming soon');
                                   },
                                   child: const Text(
                                     'Terms and Conditions',
@@ -318,8 +345,17 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       const SizedBox(height: 20),
 
                       ElevatedButton(
-                        onPressed: _submit,
-                        child: const Text('Sign Up'),
+                        onPressed: _loading ? null : _submit,
+                        child: _loading
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('Sign Up'),
                       ),
                     ],
                   ),

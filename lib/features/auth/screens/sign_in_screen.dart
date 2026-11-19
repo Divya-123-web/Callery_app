@@ -1,8 +1,10 @@
 import 'package:callery_app/features/main/screens/main.shell.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/calley_logo.dart';
+import '../services/auth_service.dart';
 import 'sign_up_screen.dart';
 
 class SignInScreen extends StatefulWidget {
@@ -17,6 +19,7 @@ class _SignInScreenState extends State<SignInScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
+  bool _loading = false;
 
   @override
   void dispose() {
@@ -35,7 +38,6 @@ class _SignInScreenState extends State<SignInScreen> {
 
   String? _validatePassword(String? value) {
     if (value == null || value.isEmpty) return 'Please enter your password';
-    if (value.length < 6) return 'Password must be at least 6 characters';
     return null;
   }
 
@@ -45,16 +47,29 @@ class _SignInScreenState extends State<SignInScreen> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _onSignIn() {
+  // POST /auth/login
+  Future<void> _onSignIn() async {
     FocusScope.of(context).unfocus();
+    if (_loading) return;
     if (!_formKey.currentState!.validate()) return;
 
-    // TODO: call the Sign In API here and only continue when it succeeds.
-    // For now any valid-looking email and password are accepted.
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const MainShell()),
-      (route) => false,
-    );
+    setState(() => _loading = true);
+    try {
+      await AuthService.login(
+        email: _emailController.text.trim().toLowerCase(),
+        password: _passwordController.text,
+      );
+      if (!mounted) return;
+
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const MainShell()),
+        (route) => false,
+      );
+    } on ApiException catch (e) {
+      if (mounted) _showMessage(e.message);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   void _onSignUp() {
@@ -64,7 +79,7 @@ class _SignInScreenState extends State<SignInScreen> {
   }
 
   void _onForgotPassword() {
-    // TODO: forgot password flow (only if the API supports it).
+    // The Mock API has no forgot-password endpoint.
     _showMessage('Forgot Password coming soon.');
   }
 
@@ -206,8 +221,17 @@ class _SignInScreenState extends State<SignInScreen> {
 
             // Sign in button
             ElevatedButton(
-              onPressed: _onSignIn,
-              child: const Text('Sign In'),
+              onPressed: _loading ? null : _onSignIn,
+              child: _loading
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Sign In'),
             ),
           ],
         ),

@@ -3,14 +3,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/calley_logo.dart';
+import '../services/auth_service.dart';
 import 'sign_in_screen.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
-  const OtpVerificationScreen({super.key, required this.phoneNumber});
+  const OtpVerificationScreen({super.key, required this.email});
 
-  final String phoneNumber;
+  final String email;
 
   @override
   State<OtpVerificationScreen> createState() => _OtpVerificationScreenState();
@@ -28,6 +30,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   Timer? _timer;
   int _secondsLeft = _resendSeconds;
   String? _error;
+  bool _verifying = false;
+  bool _resending = false;
 
   @override
   void initState() {
@@ -64,6 +68,12 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
   String get _otp => _controllers.map((c) => c.text).join();
 
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   void _onChanged(int index, String value) {
     if (_error != null) setState(() => _error = null);
     if (value.isNotEmpty && index < _otpLength - 1) {
@@ -73,36 +83,53 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     }
   }
 
-  void _resend() {
-    // TODO: Call the "resend OTP" API here once the documentation is available.
-    for (final c in _controllers) {
-      c.clear();
+  // POST /auth/send-otp
+  Future<void> _resend() async {
+    if (_resending) return;
+    setState(() => _resending = true);
+    try {
+      await AuthService.sendOtp(email: widget.email);
+      if (!mounted) return;
+      for (final c in _controllers) {
+        c.clear();
+      }
+      _focusNodes.first.requestFocus();
+      _startTimer();
+      _showMessage('OTP sent again');
+    } on ApiException catch (e) {
+      if (mounted) _showMessage(e.message);
+    } finally {
+      if (mounted) setState(() => _resending = false);
     }
-    _focusNodes.first.requestFocus();
-    _startTimer();
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('OTP sent again')));
   }
 
-  void _verify() {
+  // POST /auth/verify-otp
+  Future<void> _verify() async {
+    if (_verifying) return;
     if (_otp.length != _otpLength) {
       setState(() => _error = 'Please enter the 6-digit OTP');
       return;
     }
 
-    // TODO: Call the "verify OTP" API here once the documentation is available.
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(content: Text('Verified! Please sign in to continue')),
-      );
+    FocusScope.of(context).unfocus();
+    setState(() => _verifying = true);
+    try {
+      await AuthService.verifyOtp(email: widget.email, otp: _otp);
+      if (!mounted) return;
+      _showMessage('Verified! Please sign in to continue');
 
-    // After verification the user goes to the Sign In screen.
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const SignInScreen()),
-      (route) => false,
-    );
+      // After verification the user goes to the Sign In screen.
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const SignInScreen()),
+        (route) => false,
+      );
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() => _error = e.message);
+      }
+    } finally {
+      if (mounted) setState(() => _verifying = false);
+    }
   }
 
   String get _timerText {
@@ -153,7 +180,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      'Enter the 6-digit OTP sent to your WhatsApp number\n${widget.phoneNumber}',
+                      'Enter the 6-digit OTP sent to your email\n${widget.email}',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         fontSize: 15,
@@ -230,6 +257,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                       const SizedBox(height: 10),
                       Text(
                         _error!,
+                        textAlign: TextAlign.center,
                         style: const TextStyle(
                           fontSize: 13,
                           color: AppColors.error,
@@ -262,9 +290,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                         else
                           GestureDetector(
                             onTap: _resend,
-                            child: const Text(
-                              'Resend OTP',
-                              style: TextStyle(
+                            child: Text(
+                              _resending ? 'Sending...' : 'Resend OTP',
+                              style: const TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w700,
                                 color: AppColors.primary,
@@ -277,8 +305,17 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _verify,
-                        child: const Text('Verify'),
+                        onPressed: _verifying ? null : _verify,
+                        child: _verifying
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('Verify'),
                       ),
                     ),
                   ],
